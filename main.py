@@ -6,12 +6,50 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
-from database import engine, Base
+from database import engine, Base, SessionLocal
 from auth import router as auth_router
 from admin import router as admin_router
+from models import User, UserRole
+import bcrypt as bcrypt_lib
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
+
+
+def seed_super_admin():
+    username = os.getenv("ADMIN_USERNAME")
+    email = os.getenv("ADMIN_EMAIL")
+    password = os.getenv("ADMIN_PASSWORD")
+
+    if not username or not email or not password:
+        print("[INFO] Super admin seed skipped. ADMIN_USERNAME, ADMIN_EMAIL, or ADMIN_PASSWORD missing.")
+        return
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == email).first()
+
+        if existing:
+            print(f"[INFO] Super admin already exists: {email}")
+            return
+
+        hashed = bcrypt_lib.hashpw(password.encode("utf-8"), bcrypt_lib.gensalt()).decode("utf-8")
+
+        admin = User(
+            username=username,
+            email=email,
+            password=hashed,
+            role=UserRole.super_admin,
+        )
+
+        db.add(admin)
+        db.commit()
+        print(f"[OK] Super admin created: {email}")
+    finally:
+        db.close()
+
+
+seed_super_admin()
 
 app = FastAPI(title="Ecommerce App with Admin Protection")
 
