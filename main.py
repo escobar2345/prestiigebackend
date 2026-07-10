@@ -1,7 +1,7 @@
 import os
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
@@ -61,13 +61,19 @@ allowed_origins = [
     ).split(",")
     if origin.strip()
 ]
+allowed_origin_regex = os.getenv(
+    "ALLOWED_ORIGIN_REGEX",
+    r"https://ascend-[a-z0-9-]+\.vercel\.app",
+)
 
 print(f"[OK] ALLOWED ORIGINS: {allowed_origins}")
+print(f"[OK] ALLOWED ORIGIN REGEX: {allowed_origin_regex}")
 
 # ─── Middleware (Order Matters - CORS should be first) ─────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -83,6 +89,27 @@ app.add_middleware(
 # "Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header"
 # then your frontend origin is not included in ALLOWED_ORIGINS.
 # Add your Next.js origin (e.g. http://localhost:3001) to python-backend/.env as ALLOWED_ORIGINS.
+
+
+@app.middleware("http")
+async def protect_admin_routes(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/admin"):
+        return await call_next(request)
+
+    db = SessionLocal()
+    try:
+        user_id = request.session.get("user_id")
+        if not user_id:
+            return RedirectResponse(url="/auth/login-page?error=Please+login+to+continue", status_code=302)
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.is_super_admin():
+            return RedirectResponse(url="/?error=Access+Denied.+Admins+only.", status_code=302)
+
+        return await call_next(request)
+    finally:
+        db.close()
 
 
 # ─── Routers ───────────────────────────────────────────────────

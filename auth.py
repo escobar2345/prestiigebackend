@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.responses import JSONResponse
@@ -14,6 +16,24 @@ router = APIRouter()
 class AdminLoginPayload(BaseModel):
     email: str
     password: str
+
+
+ADMIN_ACCESS_COOKIE = "prestiige_admin_access"
+
+
+def _set_admin_cookie(response, is_admin: bool):
+    if is_admin:
+        response.set_cookie(
+            key=ADMIN_ACCESS_COOKIE,
+            value="true",
+            httponly=True,
+            secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+            samesite="lax",
+            max_age=60 * 60 * 8,
+            path="/",
+        )
+    else:
+        response.delete_cookie(ADMIN_ACCESS_COOKIE, path="/")
 
 
 def serialize_user(user: User) -> dict:
@@ -64,10 +84,12 @@ def login(
 
     # 2. Verify user exists and password is correct
     if not user or not bcrypt_lib.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
-        return RedirectResponse(
+        response = RedirectResponse(
             url="/auth/login-page?error=Invalid+username+or+password",
             status_code=302
         )
+        _set_admin_cookie(response, False)
+        return response
 
     # 3. Save user info into the session
     request.session["user_id"]   = user.id
@@ -76,16 +98,22 @@ def login(
 
     # 4. Redirect based on role
     if user.is_super_admin():
-        return RedirectResponse(url="/admin/dashboard", status_code=302)
+        response = RedirectResponse(url="/admin/dashboard", status_code=302)
+        _set_admin_cookie(response, True)
+        return response
     else:
-        return RedirectResponse(url="/", status_code=302)
+        response = RedirectResponse(url="/", status_code=302)
+        _set_admin_cookie(response, False)
+        return response
 
 
 # ─── Logout ────────────────────────────────────────────────────
 @router.get("/logout")
 def logout(request: Request):
     request.session.clear()  # Wipe the session completely
-    return RedirectResponse(url="/auth/login-page", status_code=302)
+    response = RedirectResponse(url="/auth/login-page", status_code=302)
+    _set_admin_cookie(response, False)
+    return response
 
 
 @router.api_route("/api/login", methods=["POST", "OPTIONS"], include_in_schema=False)
@@ -114,7 +142,9 @@ def api_login(
     request.session["username"] = user.username
     request.session["role"] = user.role.value
 
-    return {"user": serialize_user(user)}
+    response = JSONResponse({"user": serialize_user(user)})
+    _set_admin_cookie(response, True)
+    return response
 
 
 @router.get("/api/me")
@@ -146,7 +176,9 @@ def api_me(request: Request, db: Session = Depends(get_db)):
 @router.post("/api/logout")
 def api_logout(request: Request):
     request.session.clear()
-    return {"success": True}
+    response = JSONResponse({"success": True})
+    _set_admin_cookie(response, False)
+    return response
 
 
 # ─── Register Page (GET) ───────────────────────────────────────
