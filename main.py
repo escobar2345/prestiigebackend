@@ -1,7 +1,7 @@
 import os
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
@@ -94,26 +94,35 @@ app.add_middleware(
     secret_key=os.getenv("SESSION_SECRET", "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET_KEY_123!"),
 )
 
-# NOTE: If you see CORS errors like:
-# "Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header"
-# then your frontend origin is not included in ALLOWED_ORIGINS.
-# Add your Next.js origin (e.g. http://localhost:3001) to python-backend/.env as ALLOWED_ORIGINS.
-
 
 @app.middleware("http")
 async def protect_admin_routes(request: Request, call_next):
+    # FIX: Allow browser CORS preflight (OPTIONS) requests to bypass authentication checks
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
     if not path.startswith("/admin"):
+        return await call_next(request)
+
+    # EXCEPTION FOR FRONTEND API LOGIN: If your Vercel frontend is hitting the API login 
+    # endpoint programmatically, don't trap it in an HTML redirect loop.
+    if path == "/admin/auth/api/login":
         return await call_next(request)
 
     db = SessionLocal()
     try:
         user_id = request.session.get("user_id")
         if not user_id:
+            # If it's a programmatic fetch from Vercel, return an HTTP 401 instead of a 302 redirect
+            if "json" in request.headers.get("accept", "").lower():
+                return JSONResponse(status_code=401, content={"detail": "Please login to continue"})
             return RedirectResponse(url="/auth/login-page?error=Please+login+to+continue", status_code=302)
 
         user = db.query(User).filter(User.id == user_id).first()
         if not user or not user.is_super_admin():
+            if "json" in request.headers.get("accept", "").lower():
+                return JSONResponse(status_code=403, content={"detail": "Access Denied. Admins only."})
             return RedirectResponse(url="/?error=Access+Denied.+Admins+only.", status_code=302)
 
         return await call_next(request)
@@ -143,4 +152,3 @@ def home():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
