@@ -53,14 +53,23 @@ seed_super_admin()
 
 app = FastAPI(title="Ecommerce App with Admin Protection")
 
+# CORS
+VercelOrigin = "https://pressstigee.vercel.app"
+
 allowed_origins = [
     origin.strip()
     for origin in os.getenv(
         "ALLOWED_ORIGINS",
-        "https://pressstigee.vercel.app/",
+        # default includes both common dev origins and your deployed Vercel origin
+        "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,https://pressstigee.vercel.app",
     ).split(",")
     if origin.strip()
 ]
+
+# Explicitly ensure your Vercel frontend origin is allowed even if ALLOWED_ORIGINS env var is missing.
+if VercelOrigin not in allowed_origins:
+    allowed_origins.append(VercelOrigin)
+
 allowed_origin_regex = os.getenv(
     "ALLOWED_ORIGIN_REGEX",
     r"https://ascend-[a-z0-9-]+\.vercel\.app",
@@ -134,3 +143,4 @@ def home():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
