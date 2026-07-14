@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -12,6 +13,10 @@ load_env_file()
 # Format: postgresql://USERNAME:PASSWORD@HOST:PORT/DATABASE_NAME
 # Replace these values with your actual PostgreSQL credentials
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+
+if DATABASE_URL == "sqlite:///./app.db":
+    db_path = Path(__file__).resolve().parent / "app.db"
+    DATABASE_URL = f"sqlite:///{db_path.as_posix()}"
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
